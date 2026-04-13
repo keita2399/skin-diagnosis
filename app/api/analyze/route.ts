@@ -1,10 +1,10 @@
-import { GoogleGenerativeAI } from '@google/generative-ai'
+import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
+import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { NextRequest, NextResponse } from 'next/server'
 import { DiagnosisResultSchema } from '@/lib/schemas'
 import { buildDiagnosisPrompt } from '@/lib/prompt-builder'
 import type { DiagnosisAnswers } from '@/components/diagnosis-screen'
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
+import { logUsage } from '@/lib/logUsage'
 
 export async function POST(request: NextRequest) {
   try {
@@ -15,24 +15,40 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '問診情報が必要です' }, { status: 400 })
     }
 
-    const model = genAI.getGenerativeModel({
+    const model = new ChatGoogleGenerativeAI({
       model: 'gemini-2.5-flash',
-      generationConfig: { responseMimeType: 'application/json' },
+      temperature: 0,
+      apiKey: process.env.GEMINI_API_KEY!,
     })
 
     const prompt = buildDiagnosisPrompt(answers, !!image)
-    const parts: Parameters<typeof model.generateContent>[0] = []
+
+    const messageContent: Array<{ type: string; image_url?: { url: string }; text?: string }> = []
 
     if (image) {
+      const mimeMatch = image.match(/^data:(image\/\w+);base64,/)
+      const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg'
       const base64Data = image.replace(/^data:image\/\w+;base64,/, '')
-      const mimeType = (image.match(/^data:(image\/\w+);base64,/)?.[1] ?? 'image/jpeg') as 'image/jpeg' | 'image/png' | 'image/webp'
-      parts.push({ inlineData: { data: base64Data, mimeType } })
+      messageContent.push({
+        type: 'image_url',
+        image_url: { url: `data:${mimeType};base64,${base64Data}` },
+      })
     }
 
-    parts.push({ text: prompt })
+    messageContent.push({ type: 'text', text: prompt })
 
-    const result = await model.generateContent(parts)
-    const responseText = result.response.text()
+    const response = await model.invoke([
+      new HumanMessage({ content: messageContent }),
+    ])
+
+    logUsage({
+      project: 'skin-diagnosis',
+      model: 'gemini-2.5-flash',
+      inputTokens: response.usage_metadata?.input_tokens ?? 0,
+      outputTokens: response.usage_metadata?.output_tokens ?? 0,
+    })
+
+    const responseText = typeof response.content === 'string' ? response.content : String(response.content)
 
     let parsed: unknown
     try {
