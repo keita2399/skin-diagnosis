@@ -52,7 +52,8 @@ export async function POST(request: NextRequest) {
 
     let parsed: unknown
     try {
-      parsed = JSON.parse(responseText)
+      const cleanedText = responseText.replace(/^```json\s*/m, '').replace(/\s*```$/m, '').trim()
+      parsed = JSON.parse(cleanedText)
     } catch {
       console.error('JSON parse error:', responseText)
       return NextResponse.json({ error: 'AI応答の解析に失敗しました' }, { status: 500 })
