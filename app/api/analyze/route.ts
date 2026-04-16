@@ -1,10 +1,11 @@
-import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
-import { HumanMessage } from "@langchain/core/messages";
+import { GoogleGenerativeAI } from '@google/generative-ai'
 import { NextRequest, NextResponse } from 'next/server'
 import { DiagnosisResultSchema } from '@/lib/schemas'
 import { buildDiagnosisPrompt } from '@/lib/prompt-builder'
 import type { DiagnosisAnswers } from '@/components/diagnosis-screen'
 import { logUsage } from '@/lib/logUsage'
+
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
 
 export async function POST(request: NextRequest) {
   try {
@@ -15,55 +16,31 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '問診情報が必要です' }, { status: 400 })
     }
 
-    const model = new ChatGoogleGenerativeAI({
+    const model = genAI.getGenerativeModel({
       model: 'gemini-2.5-flash',
-      temperature: 0,
-      apiKey: process.env.GEMINI_API_KEY!,
+      generationConfig: { responseMimeType: 'application/json' },
     })
 
     const prompt = buildDiagnosisPrompt(answers, !!image)
-
-    const messageContent: Array<{ type: string; image_url?: { url: string }; text?: string }> = []
+    const parts: Parameters<typeof model.generateContent>[0] = []
 
     if (image) {
-      const mimeMatch = image.match(/^data:(image\/\w+);base64,/)
-      const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg'
       const base64Data = image.replace(/^data:image\/\w+;base64,/, '')
-      messageContent.push({
-        type: 'image_url',
-        image_url: { url: `data:${mimeType};base64,${base64Data}` },
-      })
+      const mimeType = (image.match(/^data:(image\/\w+);base64,/)?.[1] ?? 'image/jpeg') as 'image/jpeg' | 'image/png' | 'image/webp'
+      parts.push({ inlineData: { data: base64Data, mimeType } })
     }
 
-    messageContent.push({ type: 'text', text: prompt })
+    parts.push({ text: prompt })
 
-    const response = await model.invoke([
-      new HumanMessage({ content: messageContent }),
-    ])
+    const result = await model.generateContent(parts)
+    const responseText = result.response.text()
 
     logUsage({
       project: 'skin-diagnosis',
       model: 'gemini-2.5-flash',
-      inputTokens: response.usage_metadata?.input_tokens ?? 0,
-      outputTokens: response.usage_metadata?.output_tokens ?? 0,
+      inputTokens: result.response.usageMetadata?.promptTokenCount ?? 0,
+      outputTokens: result.response.usageMetadata?.candidatesTokenCount ?? 0,
     })
-
-    // gemini-2.5-flash はthinking付きで配列を返す場合があるのでtextパートだけ抽出する
-    let rawText: string
-    if (typeof response.content === 'string') {
-      rawText = response.content
-    } else if (Array.isArray(response.content)) {
-      rawText = response.content
-        .filter((p): p is { type: string; text: string } =>
-          typeof p === 'object' && p !== null && 'text' in p
-        )
-        .map((p) => p.text)
-        .join('')
-    } else {
-      rawText = String(response.content)
-    }
-    // コードブロック(```json ... ```)で囲んで返すケースに対応
-    const responseText = rawText.replace(/^```(?:json)?\s*/im, '').replace(/\s*```$/m, '').trim()
 
     let parsed: unknown
     try {
