@@ -50,12 +50,11 @@ export async function POST(request: NextRequest) {
 
     const rawText = typeof response.content === 'string' ? response.content : String(response.content)
     // Gemini がコードブロック(```json ... ```)で囲んで返すケースに対応
-    const responseText = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
+    const responseText = rawText.replace(/^```(?:json)?\s*/im, '').replace(/\s*```$/m, '').trim()
 
     let parsed: unknown
     try {
-      const cleanedText = responseText.replace(/^```json\s*/m, '').replace(/\s*```$/m, '').trim()
-      parsed = JSON.parse(cleanedText)
+      parsed = JSON.parse(responseText)
     } catch {
       console.error('JSON parse error:', responseText)
       return NextResponse.json({ error: 'AI応答の解析に失敗しました' }, { status: 500 })
