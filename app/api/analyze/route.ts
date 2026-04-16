@@ -48,8 +48,21 @@ export async function POST(request: NextRequest) {
       outputTokens: response.usage_metadata?.output_tokens ?? 0,
     })
 
-    const rawText = typeof response.content === 'string' ? response.content : String(response.content)
-    // Gemini がコードブロック(```json ... ```)で囲んで返すケースに対応
+    // gemini-2.5-flash はthinking付きで配列を返す場合があるのでtextパートだけ抽出する
+    let rawText: string
+    if (typeof response.content === 'string') {
+      rawText = response.content
+    } else if (Array.isArray(response.content)) {
+      rawText = response.content
+        .filter((p): p is { type: string; text: string } =>
+          typeof p === 'object' && p !== null && 'text' in p
+        )
+        .map((p) => p.text)
+        .join('')
+    } else {
+      rawText = String(response.content)
+    }
+    // コードブロック(```json ... ```)で囲んで返すケースに対応
     const responseText = rawText.replace(/^```(?:json)?\s*/im, '').replace(/\s*```$/m, '').trim()
 
     let parsed: unknown
