@@ -1,5 +1,5 @@
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
-import { HumanMessage, SystemMessage } from "@langchain/core/messages";
+import { HumanMessage } from "@langchain/core/messages";
 import { NextRequest, NextResponse } from 'next/server'
 import { DiagnosisResultSchema } from '@/lib/schemas'
 import { buildDiagnosisPrompt } from '@/lib/prompt-builder'
@@ -48,7 +48,9 @@ export async function POST(request: NextRequest) {
       outputTokens: response.usage_metadata?.output_tokens ?? 0,
     })
 
-    const responseText = typeof response.content === 'string' ? response.content : String(response.content)
+    const rawText = typeof response.content === 'string' ? response.content : String(response.content)
+    // Gemini がコードブロック(```json ... ```)で囲んで返すケースに対応
+    const responseText = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
 
     let parsed: unknown
     try {
